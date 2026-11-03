@@ -1,0 +1,42 @@
+groups:
+  - name: storage_infrastructure_alerts
+    rules:
+      - alert: StorageVolumeNearCapacity
+        expr: (node_filesystem_avail_bytes{mountpoint="/srv/nfs_share"} / node_filesystem_size_bytes{mountpoint="/srv/nfs_share"}) < 0.20
+        for: 5m
+        labels:
+          severity: warning
+          tier: storage
+        annotations:
+          summary: "Storage volume utilization crossed 80%"
+          description: "Storage pool on {{ $labels.instance }} has only {{ $value | humanizePercentage }} available space remaining."
+
+      - alert: StorageVolumeCriticallyFull
+        expr: (node_filesystem_avail_bytes{mountpoint="/srv/nfs_share"} / node_filesystem_size_bytes{mountpoint="/srv/nfs_share"}) < 0.10
+        for: 2m
+        labels:
+          severity: critical
+          tier: storage
+        annotations:
+          summary: "CRITICAL: Storage volume utilization crossed 90%"
+          description: "Emergency: Storage pool on {{ $labels.instance }} is critically low on space. Immediate LVM extension or cleanup required."
+
+      - alert: StorageInodesExhaustion
+        expr: (node_filesystem_files_free{mountpoint="/srv/nfs_share"} / node_filesystem_files{mountpoint="/srv/nfs_share"}) < 0.15
+        for: 5m
+        labels:
+          severity: warning
+          tier: storage
+        annotations:
+          summary: "Filesystem Inode utilization exceeded 85%"
+          description: "Storage pool on {{ $labels.instance }} is running out of inodes even if disk space is available."
+
+      - alert: HighDiskWaitLatency
+        expr: (rate(node_disk_read_time_seconds_total[5m]) / rate(node_disk_reads_completed_total[5m])) > 0.050
+        for: 10m
+        labels:
+          severity: warning
+          tier: storage
+        annotations:
+          summary: "High storage I/O wait latency detected"
+          description: "Disk I/O latency on {{ $labels.instance }} is averaging >50ms over the last 10 minutes. Check for I/O bottlenecks."

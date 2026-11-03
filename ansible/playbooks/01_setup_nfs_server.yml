@@ -1,0 +1,84 @@
+---
+- name: Enterprise Storage Service - NFS Server Provisioning & Hardening
+  hosts: storage_servers
+  become: true
+  tasks:
+    - name: Ensure required enterprise storage packages are installed
+      ansible.builtin.dnf:
+        name:
+          - nfs-utils
+          - lvm2
+          - firewalld
+          - rsync
+          - xfsprogs
+        state: present
+
+    - name: Create Volume Group on physical block device
+      community.general.lvg:
+        vg: "{{ vg_name }}"
+        pvs: "{{ storage_disk }}"
+        state: present
+
+    - name: Create Logical Volume for shared storage pool
+      community.general.lvol:
+        vg: "{{ vg_name }}"
+        lv: "{{ lv_name }}"
+        size: 50G
+        shrink: false
+        state: present
+
+    - name: Format the Logical Volume with XFS filesystem
+      community.general.filesystem:
+        fstype: xfs
+        dev: "/dev/{{ vg_name }}/{{ lv_name }}"
+
+    - name: Ensure NFS export directory exists
+      ansible.builtin.file:
+        path: "{{ nfs_export_path }}"
+        state: directory
+        mode: '2775'
+
+    - name: Mount the Logical Volume to export path with persistence in fstab
+      ansible.posix.mount:
+        path: "{{ nfs_export_path }}"
+        src: "/dev/{{ vg_name }}/{{ lv_name }}"
+        fstype: xfs
+        opts: defaults,noatime
+        state: mounted
+
+    - name: Configure secure NFS exports (/etc/exports)
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "{{ nfs_export_path }} {{ storage_subnet }}(rw,sync,no_subtree_check,root_squash)"
+        create: true
+        mode: '0644'
+      notify: Reload NFS Exports
+
+    - name: Start and enable firewalld service
+      ansible.builtin.service:
+        name: firewalld
+        state: started
+        enabled: true
+
+    - name: Open firewall rules for NFSv4, mountd, and rpc-bind for internal storage subnet
+      ansible.posix.firewalld:
+        zone: internal
+        source: "{{ storage_subnet }}"
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - nfs
+        - mountd
+        - rpc-bind
+
+    - name: Ensure NFS server daemon is started and enabled at boot
+      ansible.builtin.service:
+        name: nfs-server
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Reload NFS Exports
+      ansible.builtin.command: exportfs -arv

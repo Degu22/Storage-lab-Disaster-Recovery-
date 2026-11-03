@@ -1,0 +1,34 @@
+---
+- name: Enterprise Storage Service - Client Mount & Persistence Automation
+  hosts: storage_clients
+  become: true
+  tasks:
+    - name: Ensure NFS client utilities are installed
+      ansible.builtin.dnf:
+        name:
+          - nfs-utils
+        state: present
+
+    - name: Create local client mount directory
+      ansible.builtin.file:
+        path: "{{ nfs_client_mount }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount remote NFS storage and persist in /etc/fstab
+      ansible.posix.mount:
+        path: "{{ nfs_client_mount }}"
+        src: "{{ nfs_server_ip }}:{{ nfs_export_path }}"
+        fstype: nfs4
+        opts: "defaults,_netdev,nofail,soft,timeo=150,retrans=3"
+        state: mounted
+
+    - name: Verify mount status by checking system mounts
+      ansible.builtin.command: "mountpoint -q {{ nfs_client_mount }}"
+      register: mount_check
+      changed_when: false
+      failed_when: mount_check.rc != 0
+
+    - name: Output mount verification confirmation
+      ansible.builtin.debug:
+        msg: "Storage share successfully mounted at {{ nfs_client_mount }} on host {{ inventory_hostname }}"
