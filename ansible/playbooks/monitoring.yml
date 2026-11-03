@@ -1,17 +1,37 @@
 ---
-# Management & Monitoring Node Setup (Prometheus & Grafana)
-- name: Configure Prometheus & Grafana on Management Node
+# ==============================================================================
+# Master Monitoring Deployment Playbook: Prometheus, Alertmanager & Grafana
+# ==============================================================================
+- name: Deploy Complete Observability Stack on Management Node
   hosts: management_servers
   become: true
   tasks:
-    - name: Install Prometheus and Alertmanager packages
+    - name: 1. Install Prometheus and Alertmanager packages
       ansible.builtin.apt:
         name:
           - prometheus
           - prometheus-alertmanager
         state: present
 
-    - name: Allow Prometheus port 9090 and Alertmanager port 9093 in UFW
+    - name: 2. Install Grafana GPG key
+      ansible.builtin.get_url:
+        url: https://apt.grafana.com/gpg.key
+        dest: /etc/apt/keyrings/grafana.asc
+        mode: '0644'
+
+    - name: 3. Add Grafana official repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+        state: present
+        filename: grafana
+
+    - name: 4. Install Grafana package
+      ansible.builtin.apt:
+        name: grafana
+        state: present
+        update_cache: true
+
+    - name: 5. Allow Prometheus, Alertmanager, and Grafana through UFW
       community.general.ufw:
         rule: allow
         port: "{{ item }}"
@@ -21,26 +41,102 @@
         - '9093'
         - '3000'
 
-    - name: Install Grafana GPG key
-      ansible.builtin.get_url:
-        url: https://apt.grafana.com/gpg.key
-        dest: /etc/apt/keyrings/grafana.asc
+    - name: 6. Create Prometheus rules directory
+      ansible.builtin.file:
+        path: /etc/prometheus/rules
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+
+    - name: 7. Deploy Prometheus configuration dynamically rendered from inventory
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../monitoring/prometheus/prometheus.yml.j2"
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
         mode: '0644'
+      notify: Restart Prometheus
 
-    - name: Add Grafana repository
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
-        state: present
-        filename: grafana
+    - name: 8. Deploy storage alert rules
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../monitoring/prometheus/rules/storage_alerts.yml"
+        dest: /etc/prometheus/rules/storage_alerts.yml
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+      notify: Restart Prometheus
 
-    - name: Install Grafana package
-      ansible.builtin.apt:
-        name: grafana
-        state: present
-        update_cache: true
+    - name: 9. Deploy Alertmanager configuration
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../monitoring/alertmanager/alertmanager.yml.example"
+        dest: /etc/prometheus/alertmanager.yml
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+      notify: Restart Alertmanager
 
-    - name: Ensure Grafana service is running and enabled
+    - name: 10. Create Grafana provisioning directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: grafana
+        mode: '0755'
+      loop:
+        - /etc/grafana/provisioning/datasources
+        - /etc/grafana/provisioning/dashboards
+        - /var/lib/grafana/dashboards
+
+    - name: 11. Deploy Grafana Prometheus datasource
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../monitoring/grafana/provisioning/datasources/datasource.yml"
+        dest: /etc/grafana/provisioning/datasources/datasource.yml
+        owner: root
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+
+    - name: 12. Deploy Grafana dashboard provider
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../monitoring/grafana/provisioning/dashboards/dashboard_provider.yml"
+        dest: /etc/grafana/provisioning/dashboards/dashboard_provider.yml
+        owner: root
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+
+    - name: 13. Deploy Enterprise Storage Dashboard JSON
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../monitoring/grafana/dashboards/storage_overview.json"
+        dest: /var/lib/grafana/dashboards/storage_overview.json
+        owner: root
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+
+    - name: 14. Ensure all monitoring services are started and enabled
       ansible.builtin.systemd:
-        name: grafana-server
+        name: "{{ item }}"
         state: started
         enabled: true
+      loop:
+        - prometheus
+        - prometheus-alertmanager
+        - grafana-server
+
+  handlers:
+    - name: Restart Prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        state: restarted
+
+    - name: Restart Alertmanager
+      ansible.builtin.systemd:
+        name: prometheus-alertmanager
+        state: restarted
+
+    - name: Restart Grafana
+      ansible.builtin.systemd:
+        name: grafana-server
+        state: restarted

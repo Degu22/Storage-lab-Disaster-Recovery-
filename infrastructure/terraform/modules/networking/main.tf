@@ -72,3 +72,23 @@ resource "aws_route_table_association" "storage_assoc" {
   subnet_id      = aws_subnet.storage.id
   route_table_id = aws_route_table.public.id
 }
+
+# ------------------------------------------------------------------------------
+# S3 Gateway VPC Endpoint
+# Enables direct, private, zero-cost communication to Amazon S3 for backups/restores
+# without traversing the public internet or incurring NAT Gateway charges.
+# ------------------------------------------------------------------------------
+data "aws_region" "current" {}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${data.aws_region.current.name}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.public.id]
+
+  tags = {
+    Name        = "${var.project_name}-s3-gateway-endpoint"
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}

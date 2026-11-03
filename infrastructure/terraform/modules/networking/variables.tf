@@ -35,7 +35,7 @@ variable "availability_zone" {
 }
 
 variable "assign_public_ip_to_storage" {
-  description = "Whether to assign public IPs to storage/client nodes for lab accessibility (avoids costly NAT Gateway). Protected by strict Security Groups."
+  description = "Whether to assign public IPs to storage/client nodes. Defaults to false for strict private isolation. When false, S3 operates privately via the S3 Gateway VPC Endpoint. For temporary labs without NAT Gateway ($32+/mo), setting to true enables outbound apt package downloads and direct SSM access while security groups block 100% of inbound public traffic."
   type        = bool
-  default     = true
+  default     = false
 }

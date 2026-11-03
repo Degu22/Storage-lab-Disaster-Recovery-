@@ -13,6 +13,23 @@
     proto: tcp
     comment: "Prometheus metrics scrape access"
 
+- name: Configure Node Exporter collectors (enable systemd collector for nfs-kernel-server)
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-node-exporter
+    content: |
+      # Enable systemd unit monitoring for storage availability alerting
+      ARGS="--collector.systemd --collector.systemd.unit-include=(nfs-kernel-server|ssh)\\.service"
+    owner: root
+    group: root
+    mode: '0644'
+  register: node_exporter_config
+
+- name: Restart Node Exporter if configuration changed
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: restarted
+  when: node_exporter_config.changed
+
 - name: Ensure Node Exporter service is running and enabled
   ansible.builtin.systemd:
     name: prometheus-node-exporter

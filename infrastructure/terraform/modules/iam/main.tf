@@ -1,44 +1,95 @@
-# IAM Role for EC2 Instance Profile (Zero hardcoded credentials)
-resource "aws_iam_role" "ec2_storage_dr_role" {
-  name = "${var.project_name}-ec2-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.project_name}-ec2-role"
-    Environment = var.environment
+# Common EC2 Assume Role Policy document
+data "aws_iam_policy_document" "ec2_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
   }
 }
 
-# Attach AWS Systems Manager (SSM) Core policy for secure agent-based management without open inbound ports
-resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.ec2_storage_dr_role.name
+# ==============================================================================
+# 1. Management Node IAM Role & Profile (SSM Core Only)
+# ==============================================================================
+resource "aws_iam_role" "management_role" {
+  name               = "${var.project_name}-management-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+
+  tags = {
+    Name        = "${var.project_name}-management-role"
+    Environment = var.environment
+    Tier        = "Management"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "management_ssm" {
+  role       = aws_iam_role.management_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Least-Privilege S3 Policy for Backup and Disaster Recovery
-# DevSecOps Hardening: s3:DeleteObject is intentionally omitted so compromised
-# instances cannot wipe existing backups. Retention is managed via S3 Lifecycle Rules.
-resource "aws_iam_policy" "s3_backup_restore_policy" {
-  name        = "${var.project_name}-s3-dr-policy"
+resource "aws_iam_instance_profile" "management_instance_profile" {
+  name = "${var.project_name}-management-instance-profile"
+  role = aws_iam_role.management_role.name
+}
+
+# ==============================================================================
+# 2. NFS Client Node IAM Role & Profile (SSM Core Only)
+# ==============================================================================
+resource "aws_iam_role" "client_role" {
+  name               = "${var.project_name}-client-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+
+  tags = {
+    Name        = "${var.project_name}-client-role"
+    Environment = var.environment
+    Tier        = "Client"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "client_ssm" {
+  role       = aws_iam_role.client_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "client_instance_profile" {
+  name = "${var.project_name}-client-instance-profile"
+  role = aws_iam_role.client_role.name
+}
+
+# ==============================================================================
+# 3. NFS Storage Server IAM Role & Profile (SSM Core + Scoped S3 DR Permissions)
+# ==============================================================================
+resource "aws_iam_role" "storage_server_role" {
+  name               = "${var.project_name}-storage-server-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+
+  tags = {
+    Name        = "${var.project_name}-storage-server-role"
+    Environment = var.environment
+    Tier        = "Storage"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "storage_server_ssm" {
+  role       = aws_iam_role.storage_server_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Least-Privilege S3 Policy for Backup & Restore
+# DevSecOps Hardening:
+# - Bucket-level operations (ListBucket, GetBucketLocation) applied strictly to bucket ARN
+# - Object-level operations (PutObject, GetObject) applied strictly to bucket objects
+# - s3:DeleteObject is intentionally OMITTED for ransomware defense; retention is managed via S3 Lifecycle
+resource "aws_iam_policy" "storage_s3_dr_policy" {
+  name        = "${var.project_name}-storage-s3-dr-policy"
   description = "Scoped permissions for S3 Disaster Recovery backups and restore operations"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ListDRBucket"
+        Sid    = "BucketLevelListAndLocation"
         Effect = "Allow"
         Action = [
           "s3:ListBucket",
@@ -47,7 +98,7 @@ resource "aws_iam_policy" "s3_backup_restore_policy" {
         Resource = var.s3_bucket_arn
       },
       {
-        Sid    = "ReadWriteDRObjects"
+        Sid    = "ObjectLevelPutAndGet"
         Effect = "Allow"
         Action = [
           "s3:PutObject",
@@ -59,13 +110,12 @@ resource "aws_iam_policy" "s3_backup_restore_policy" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "s3_dr_attach" {
-  role       = aws_iam_role.ec2_storage_dr_role.name
-  policy_arn = aws_iam_policy.s3_backup_restore_policy.arn
+resource "aws_iam_role_policy_attachment" "storage_s3_attach" {
+  role       = aws_iam_role.storage_server_role.name
+  policy_arn = aws_iam_policy.storage_s3_dr_policy.arn
 }
 
-# Instance Profile to attach to EC2 instances
-resource "aws_iam_instance_profile" "instance_profile" {
-  name = "${var.project_name}-instance-profile"
-  role = aws_iam_role.ec2_storage_dr_role.name
+resource "aws_iam_instance_profile" "storage_server_instance_profile" {
+  name = "${var.project_name}-storage-server-instance-profile"
+  role = aws_iam_role.storage_server_role.name
 }

@@ -14,9 +14,8 @@ variable "vpc_id" {
 }
 
 variable "admin_ingress_cidrs" {
-  description = "List of authorized external IP CIDRs for administrative SSH, Grafana (:3000), and Prometheus (:9090)"
+  description = "Explicit list of authorized external IP CIDRs for administrative SSH, Grafana (:3000), and Prometheus (:9090). Must not be 0.0.0.0/0 in production."
   type        = list(string)
-  default     = ["0.0.0.0/0"] # Set to specific admin IP in terraform.tfvars for production
 }
 
 variable "management_subnet_cidr" {

@@ -7,25 +7,78 @@
       - xfsprogs
     state: present
 
-- name: Identify attached EBS data disk (excluding root partition)
+- name: Discover and validate EBS storage block device safely
   ansible.builtin.shell: |
-    lsblk -dpno NAME,TYPE,MOUNTPOINT | awk '$2=="disk" && $3=="" {print $1}' | head -n 1
-  register: discovered_data_disk
+    set -euo pipefail
+
+    # Step 1: Detect OS root device and parent disk
+    ROOT_PART=$(findmnt -n -o SOURCE /)
+    ROOT_DISK=$(lsblk -no PKNAME "${ROOT_PART}" 2>/dev/null || basename "${ROOT_PART}")
+
+    # Step 2: Check if device is already an active LVM Physical Volume for our VG
+    ACTIVE_PV=$(pvs --noheadings -o pv_name,vg_name 2>/dev/null | awk -v vg="{{ vg_name }}" '$2==vg {print $1}' | head -n 1)
+    if [[ -n "${ACTIVE_PV}" && -b "${ACTIVE_PV}" ]]; then
+        echo "${ACTIVE_PV}"
+        exit 0
+    fi
+
+    # Step 3: Match expected EBS Volume ID via serial if provided
+    EXPECTED_VOL="{{ ebs_volume_id | default('') }}"
+    CLEAN_SERIAL=$(echo "${EXPECTED_VOL}" | tr -d '-')
+    if [[ -n "${CLEAN_SERIAL}" ]]; then
+        SERIAL_MATCH=$(lsblk -dpno NAME,SERIAL | awk -v s="${CLEAN_SERIAL}" '$2==s {print $1}' | head -n 1)
+        if [[ -n "${SERIAL_MATCH}" && -b "${SERIAL_MATCH}" ]]; then
+            echo "${SERIAL_MATCH}"
+            exit 0
+        fi
+    fi
+
+    # Step 4: Scan candidate disks (strictly excluding root disk and mounted disks)
+    CANDIDATES=()
+    while read -r DISK_NAME; do
+        BASE_NAME=$(basename "${DISK_NAME}")
+        # Skip if matches root disk or parent
+        if [[ "${BASE_NAME}" == "${ROOT_DISK}" || "${DISK_NAME}" == "${ROOT_PART}" ]]; then
+            continue
+        fi
+        # Skip if any partition on this disk is mounted
+        MOUNT_COUNT=$(lsblk -no MOUNTPOINT "${DISK_NAME}" 2>/dev/null | grep -v '^$' | wc -l)
+        if (( MOUNT_COUNT > 0 )); then
+            continue
+        fi
+        CANDIDATES+=("${DISK_NAME}")
+    done < <(lsblk -dpno NAME,TYPE | awk '$2=="disk" {print $1}')
+
+    # Step 5: Assert exactly one candidate disk is found
+    if (( ${#CANDIDATES[@]} == 1 )); then
+        echo "${CANDIDATES[0]}"
+        exit 0
+    elif (( ${#CANDIDATES[@]} == 0 )); then
+        echo "ERROR_NO_CANDIDATE"
+        exit 1
+    else
+        echo "ERROR_MULTIPLE_CANDIDATES"
+        exit 2
+    fi
+  register: ebs_discovery
   changed_when: false
+  failed_when: ebs_discovery.rc != 0 or ebs_discovery.stdout.startswith("ERROR")
 
-- name: Set storage device variable
+- name: Set validated target storage device fact
   ansible.builtin.set_fact:
-    target_storage_device: "{{ discovered_data_disk.stdout | default(storage_device_candidate, true) }}"
+    target_storage_device: "{{ ebs_discovery.stdout | trim }}"
 
-- name: Validate that target storage device was detected
+- name: Strict safety assertions on discovered storage device
   ansible.builtin.assert:
     that:
       - target_storage_device is defined
       - target_storage_device != ""
-      - target_storage_device != "/dev/nvme0n1"
+      - target_storage_device.startswith('/dev/')
       - target_storage_device != "/dev/sda"
-    fail_msg: "CRITICAL: Safety check failed! Target disk was either not found or matches the root OS volume."
-    success_msg: "Safety check passed: Target storage disk identified as {{ target_storage_device }}"
+      - target_storage_device != "/dev/nvme0n1"
+      - target_storage_device != "/dev/xvda"
+    fail_msg: "CRITICAL: Storage safety assertion failed! Unsafe or invalid device: '{{ target_storage_device }}'"
+    success_msg: "Safety verified: Unambiguous target EBS data disk confirmed as {{ target_storage_device }}"
 
 - name: Create LVM Volume Group on EBS target disk
   community.general.lvg:

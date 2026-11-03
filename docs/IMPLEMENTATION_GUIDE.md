@@ -51,7 +51,10 @@ After provisioning completes, copy the generated outputs:
 # 1. Navigate to the Ansible directory
 cd ../../../../ansible
 
-# 2. Copy inventory and group variable examples
+# 2. Install required Ansible collections
+ansible-galaxy collection install -r requirements.yml
+
+# 3. Copy inventory and group variable examples
 cp inventory/hosts.example.ini inventory/hosts.ini
 cp inventory/group_vars/all.yml.example inventory/group_vars/all.yml
 

@@ -171,7 +171,7 @@ storage-lab-disaster-recovery/
 ## 6. Storage Lifecycle & DevSecOps Implementation
 
 ### 6.1 Safe Storage Discovery & LVM
-To prevent accidental destruction of root filesystems, the Ansible storage role checks `lsblk` and asserts that candidate disks do not match the operating system volume (`/dev/nvme0n1` or `/dev/sda`). The dedicated EBS disk is placed into Volume Group `vg_storage`, carved into Logical Volume `lv_data`, formatted with XFS, and mounted to `/srv/nfs_share`.
+To prevent accidental destruction of the OS root filesystem, the Ansible storage role detects the root partition (`findmnt -n -o SOURCE /`) and resolves its parent disk (`lsblk -no PKNAME`). It validates EBS volume metadata/serial, scans candidate disks, rejects any disk containing active mounts, and ensures only the unambiguous non-root EBS disk is provisioned into Volume Group `vg_storage`, carved into Logical Volume `lv_data`, formatted with XFS, and mounted to `/srv/nfs_share`.
 
 ### 6.2 NFSv4 Security & Privilege Escalation Mitigation
 In `/etc/exports`, client access is restricted strictly to the internal storage subnet:
@@ -237,6 +237,7 @@ terraform apply
 ### Step 2: Configure Nodes via Ansible
 ```bash
 cd ../../../../ansible
+ansible-galaxy collection install -r requirements.yml
 cp inventory/hosts.example.ini inventory/hosts.ini
 cp inventory/group_vars/all.yml.example inventory/group_vars/all.yml
 # Fill in outputs from Terraform

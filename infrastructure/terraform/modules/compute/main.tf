@@ -21,7 +21,7 @@ resource "aws_instance" "management" {
   key_name             = var.ssh_key_name
   subnet_id            = var.management_subnet_id
   vpc_security_group_ids = [var.management_sg_id]
-  iam_instance_profile = var.instance_profile_name
+  iam_instance_profile = var.management_instance_profile_name
 
   root_block_device {
     volume_size           = var.root_volume_size
@@ -47,7 +47,7 @@ resource "aws_instance" "storage_server" {
   key_name             = var.ssh_key_name
   subnet_id            = var.storage_subnet_id
   vpc_security_group_ids = [var.storage_server_sg_id]
-  iam_instance_profile = var.instance_profile_name
+  iam_instance_profile = var.storage_server_instance_profile_name
 
   root_block_device {
     volume_size           = var.root_volume_size
@@ -80,7 +80,7 @@ resource "aws_instance" "client" {
   key_name             = var.ssh_key_name
   subnet_id            = var.storage_subnet_id
   vpc_security_group_ids = [var.client_sg_id]
-  iam_instance_profile = var.instance_profile_name
+  iam_instance_profile = var.client_instance_profile_name
 
   root_block_device {
     volume_size           = var.root_volume_size

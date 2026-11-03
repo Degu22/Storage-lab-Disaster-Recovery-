@@ -45,18 +45,30 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_bucket_crypto"
   }
 }
 
-# S3 Lifecycle Rule for Cost-Conscious Retention (Expire noncurrent backup versions after 30 days)
+# S3 Lifecycle Configuration for Cost-Conscious Retention
+# Manages current objects, noncurrent versions, and aborted multipart uploads
 resource "aws_s3_bucket_lifecycle_configuration" "dr_bucket_lifecycle" {
   bucket = aws_s3_bucket.dr_bucket.id
 
   rule {
-    id     = "expire-old-dr-backups"
+    id     = "dr-backup-lifecycle-retention"
     status = "Enabled"
 
     filter {}
 
+    # Expire current backup archives after configurable retention period
+    expiration {
+      days = var.backup_retention_days
+    }
+
+    # Clean up noncurrent (overwritten/deleted) versions
     noncurrent_version_expiration {
-      noncurrent_days = 30
+      noncurrent_days = var.noncurrent_version_retention_days
+    }
+
+    # Automatically abort incomplete multipart uploads to eliminate hidden storage costs
+    abort_incomplete_multipart_upload {
+      days_after_initiation = var.abort_incomplete_multipart_upload_days
     }
   }
 }

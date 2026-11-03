@@ -2,10 +2,21 @@
 # ==============================================================================
 # Script Name   : simulate_nfs_failure.sh
 # Purpose       : Controlled simulation of NFS server daemon crash.
-# Precondition  : Must be executed on the NFS Storage Server.
+# Safety Rules  : Explicit confirmation required (--confirm).
 # ==============================================================================
 
 set -euo pipefail
+
+if [[ "${1:-}" != "--confirm" ]]; then
+    echo "================================================================================"
+    echo "SAFETY GATE: NFS Service Crash Simulation"
+    echo "This script temporarily stops 'nfs-kernel-server' on this host."
+    echo "Client mounts will pause operations until the service is restarted."
+    echo ""
+    echo "To proceed, run: $0 --confirm"
+    echo "================================================================================"
+    exit 1
+fi
 
 echo "[+] Initiating controlled NFS service interruption simulation..."
 
@@ -13,11 +24,12 @@ echo "[+] Initiating controlled NFS service interruption simulation..."
 echo "[*] Stopping nfs-kernel-server service..."
 systemctl stop nfs-kernel-server
 
-echo "[!] NFS service stopped."
-echo "[*] Verification: Check 'systemctl status nfs-kernel-server'"
-echo "[*] Verification on Client: Client accesses to /mnt/nfs_share will now hang or report timeout."
-echo "[*] Verification in Prometheus: Check 'NFSDown' or 'StorageServiceUnavailable' alert rule."
+echo "[!] NFS service is now STOPPED."
+echo "[*] Expected symptom: 'systemctl status nfs-kernel-server' will report inactive (dead)."
+echo "[*] Client symptom: In-flight I/O on /mnt/nfs_share will queue and await reconnect."
+echo "[*] Monitoring: Prometheus alert 'NFSServiceDown' will trigger after 1 minute."
 echo ""
 echo "To recover service, run:"
 echo "  sudo systemctl start nfs-kernel-server"
 echo "  or run: ./reset_lab.sh"
+exit 0

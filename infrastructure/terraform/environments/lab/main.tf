@@ -27,10 +27,12 @@ module "security" {
 module "storage" {
   source = "../../modules/storage"
 
-  project_name      = var.project_name
-  environment       = var.environment
-  availability_zone = var.availability_zone
-  ebs_volume_size   = var.ebs_volume_size
+  project_name                      = var.project_name
+  environment                       = var.environment
+  availability_zone                 = var.availability_zone
+  ebs_volume_size                   = var.ebs_volume_size
+  backup_retention_days             = var.backup_retention_days
+  noncurrent_version_retention_days = var.noncurrent_version_retention_days
 }
 
 # 4. IAM Module (EC2 Instance Profile, SSM Core, Scoped S3 DR Policy)
@@ -57,6 +59,8 @@ module "compute" {
   management_sg_id         = module.security.management_sg_id
   storage_server_sg_id     = module.security.storage_server_sg_id
   client_sg_id             = module.security.client_sg_id
-  instance_profile_name    = module.iam.instance_profile_name
+  management_instance_profile_name     = module.iam.management_instance_profile_name
+  storage_server_instance_profile_name = module.iam.storage_server_instance_profile_name
+  client_instance_profile_name         = module.iam.client_instance_profile_name
   nfs_ebs_volume_id        = module.storage.ebs_volume_id
 }

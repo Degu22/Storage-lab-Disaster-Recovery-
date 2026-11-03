@@ -30,3 +30,21 @@ variable "s3_bucket_prefix" {
   type        = string
   default     = "storage-dr-backup"
 }
+
+variable "backup_retention_days" {
+  description = "Days to retain current S3 backup archives before automated lifecycle expiration"
+  type        = number
+  default     = 30
+}
+
+variable "noncurrent_version_retention_days" {
+  description = "Days to retain noncurrent/superseded S3 backup versions before permanent deletion"
+  type        = number
+  default     = 14
+}
+
+variable "abort_incomplete_multipart_upload_days" {
+  description = "Days after which incomplete S3 multipart uploads are automatically aborted"
+  type        = number
+  default     = 7
+}

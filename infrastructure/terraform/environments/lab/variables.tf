@@ -41,9 +41,8 @@ variable "storage_subnet_cidr" {
 }
 
 variable "admin_ingress_cidrs" {
-  description = "List of authorized IP CIDRs allowed to access SSH, Prometheus (:9090), and Grafana (:3000)"
+  description = "Explicit list of authorized IP CIDRs allowed to access SSH, Prometheus (:9090), and Grafana (:3000). Must be specified (e.g. [\"203.0.113.50/32\"])."
   type        = list(string)
-  default     = ["0.0.0.0/0"] # Change to your actual IP/32 in production
 }
 
 variable "ssh_key_name" {
@@ -75,8 +74,20 @@ variable "ebs_volume_size" {
   default     = 20
 }
 
+variable "backup_retention_days" {
+  description = "Days to retain current S3 backup archives before automated expiration"
+  type        = number
+  default     = 30
+}
+
+variable "noncurrent_version_retention_days" {
+  description = "Days to retain noncurrent S3 backup versions before permanent deletion"
+  type        = number
+  default     = 14
+}
+
 variable "assign_public_ip_to_storage" {
-  description = "Assign public IPs to storage/client nodes for lab accessibility without NAT Gateway"
+  description = "Assign public IPs to storage/client nodes. Defaults to false for strict private isolation. When false, S3 operates privately via the S3 Gateway VPC Endpoint. For temporary labs without NAT Gateway ($32+/mo), setting to true enables outbound apt package downloads and direct SSM access while security groups block 100% of inbound public traffic."
   type        = bool
-  default     = true
+  default     = false
 }

@@ -11,6 +11,26 @@ groups:
           summary: "Storage Node Exporter is unreachable"
           description: "Target {{ $labels.instance }} has been down for more than 1 minute."
 
+      - alert: NFSServiceDown
+        expr: node_systemd_unit_state{name="nfs-kernel-server.service",state="active"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          tier: storage
+        annotations:
+          summary: "NFS Kernel Server is Down"
+          description: "NFS service on {{ $labels.instance }} is inactive or stopped."
+
+      - alert: NFSClientMountMissing
+        expr: absent(node_filesystem_size_bytes{mountpoint="/mnt/nfs_share"}) == 1
+        for: 2m
+        labels:
+          severity: critical
+          tier: client
+        annotations:
+          summary: "NFS Share Unmounted on Client"
+          description: "NFS client mountpoint /mnt/nfs_share on {{ $labels.instance }} is missing or dismounted."
+
       - alert: StorageVolumeNearCapacity
         expr: (node_filesystem_avail_bytes{mountpoint="/srv/nfs_share"} / node_filesystem_size_bytes{mountpoint="/srv/nfs_share"}) < 0.20
         for: 5m

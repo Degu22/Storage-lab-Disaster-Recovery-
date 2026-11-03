@@ -56,8 +56,18 @@ variable "client_sg_id" {
   type        = string
 }
 
-variable "instance_profile_name" {
-  description = "IAM instance profile name with SSM and S3 permissions"
+variable "management_instance_profile_name" {
+  description = "IAM instance profile name for Management Node (SSM Core)"
+  type        = string
+}
+
+variable "storage_server_instance_profile_name" {
+  description = "IAM instance profile name for Storage Server (SSM Core + Scoped S3 DR)"
+  type        = string
+}
+
+variable "client_instance_profile_name" {
+  description = "IAM instance profile name for Client Node (SSM Core)"
   type        = string
 }
 

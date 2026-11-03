@@ -1,4 +1,12 @@
-# Example Alertmanager Configuration
+# ==============================================================================
+# Alertmanager Configuration
+# ==============================================================================
+# IMPORTANT: By default, this configuration routes alerts to a null/blackhole receiver
+# to avoid failing alert dispatch attempts when no external notification channels
+# (Slack, PagerDuty, or SMTP) are configured in the lab.
+# Configure an active receiver below when integration credentials are provided.
+# ==============================================================================
+
 global:
   resolve_timeout: 5m
 
@@ -7,16 +15,21 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: 'storage-team-webhook'
+  # Default to local-logger/blackhole receiver in lab environment
+  receiver: 'local-audit-logger'
 
 receivers:
-  - name: 'storage-team-webhook'
-    webhook_configs:
-      - url: 'http://127.0.0.1:5001/webhook'
-        send_resolved: true
+  # Default receiver: routes alerts to local null endpoint during lab testing
+  - name: 'local-audit-logger'
 
-# Optional Email / Slack notification receiver example:
-#  - name: 'storage-team-slack'
-#    slack_configs:
-#      - channel: '#storage-alerts'
-#        api_url: 'https://hooks.slack.com/services/EXAMPLE'
+  # Example integration for enterprise webhook (e.g. custom incident response bridge)
+  # - name: 'storage-team-webhook'
+  #   webhook_configs:
+  #     - url: 'http://127.0.0.1:5001/webhook'
+  #       send_resolved: true
+
+  # Example integration for Slack notifications
+  # - name: 'storage-team-slack'
+  #   slack_configs:
+  #     - channel: '#storage-alerts'
+  #       api_url: 'https://hooks.slack.com/services/REPLACE_WITH_ACTUAL_WEBHOOK_URL'
