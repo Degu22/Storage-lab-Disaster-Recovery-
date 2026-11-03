@@ -1,0 +1,27 @@
+# ==============================================================================
+# Terraform Variables Example - Enterprise Storage & Disaster Recovery Lab
+# ==============================================================================
+# Copy this file to 'terraform.tfvars' and supply your specific configuration.
+# Never commit 'terraform.tfvars' containing private or sensitive values.
+
+aws_region        = "eu-north-1"
+availability_zone = "eu-north-1a"
+project_name      = "storage-dr-lab"
+environment       = "lab"
+
+# Supply your existing AWS Key Pair name here (e.g., "my-aws-key")
+ssh_key_name = "storage-lab-key"
+
+# Restrict to your home/work external IP for secure access (e.g., ["203.0.113.50/32"])
+admin_ingress_cidrs = ["0.0.0.0/0"]
+
+# Instance sizing (Configurable based on budget and compute requirements)
+management_instance_type = "t3.small" # 2 vCPU, 2 GiB RAM (ideal for Prometheus + Grafana)
+storage_instance_type    = "t3.micro" # 2 vCPU, 1 GiB RAM
+client_instance_type     = "t3.micro" # 2 vCPU, 1 GiB RAM
+
+# Storage Sizing
+ebs_volume_size = 20 # 20 GiB dedicated data pool for LVM and XFS
+
+# Assign public IPs to storage/client nodes to allow direct lab access without AWS NAT Gateway ($32/month)
+assign_public_ip_to_storage = true

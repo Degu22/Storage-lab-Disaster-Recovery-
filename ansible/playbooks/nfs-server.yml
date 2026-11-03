@@ -1,0 +1,10 @@
+---
+# Standalone Provisioning Playbook for NFS Storage Server
+- name: Provision NFS Storage Server
+  hosts: storage_servers
+  become: true
+  roles:
+    - common
+    - storage
+    - nfs_server
+    - node_exporter

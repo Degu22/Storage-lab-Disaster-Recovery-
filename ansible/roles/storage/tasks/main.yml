@@ -1,0 +1,86 @@
+---
+# Safe Storage Management with LVM & XFS on Ubuntu 24.04
+- name: Install LVM2 and XFS file system utilities
+  ansible.builtin.apt:
+    name:
+      - lvm2
+      - xfsprogs
+    state: present
+
+- name: Identify attached EBS data disk (excluding root partition)
+  ansible.builtin.shell: |
+    lsblk -dpno NAME,TYPE,MOUNTPOINT | awk '$2=="disk" && $3=="" {print $1}' | head -n 1
+  register: discovered_data_disk
+  changed_when: false
+
+- name: Set storage device variable
+  ansible.builtin.set_fact:
+    target_storage_device: "{{ discovered_data_disk.stdout | default(storage_device_candidate, true) }}"
+
+- name: Validate that target storage device was detected
+  ansible.builtin.assert:
+    that:
+      - target_storage_device is defined
+      - target_storage_device != ""
+      - target_storage_device != "/dev/nvme0n1"
+      - target_storage_device != "/dev/sda"
+    fail_msg: "CRITICAL: Safety check failed! Target disk was either not found or matches the root OS volume."
+    success_msg: "Safety check passed: Target storage disk identified as {{ target_storage_device }}"
+
+- name: Create LVM Volume Group on EBS target disk
+  community.general.lvg:
+    vg: "{{ vg_name }}"
+    pvs: "{{ target_storage_device }}"
+    state: present
+
+- name: Create Logical Volume for shared storage
+  community.general.lvol:
+    vg: "{{ vg_name }}"
+    lv: "{{ lv_name }}"
+    size: "{{ lv_size | default('15G') }}"
+    shrink: false
+    state: present
+
+- name: Format Logical Volume with XFS filesystem
+  community.general.filesystem:
+    fstype: "{{ filesystem_type | default('xfs') }}"
+    dev: "/dev/{{ vg_name }}/{{ lv_name }}"
+
+- name: Create NFS export directory
+  ansible.builtin.file:
+    path: "{{ nfs_export_path }}"
+    state: directory
+    owner: "{{ nfs_squash_user | default('nobody') }}"
+    group: "{{ nfs_squash_group | default('nogroup') }}"
+    mode: '2775'
+
+- name: Mount Logical Volume to export path and persist in /etc/fstab
+  ansible.posix.mount:
+    path: "{{ nfs_export_path }}"
+    src: "/dev/{{ vg_name }}/{{ lv_name }}"
+    fstype: "{{ filesystem_type | default('xfs') }}"
+    opts: "defaults,noatime"
+    state: mounted
+
+- name: Create operational scripts directory (/opt/scripts)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/scripts
+    - /opt/scripts/backup
+    - /opt/scripts/recovery
+    - /opt/scripts/monitoring
+    - /opt/scripts/failure-simulation
+
+- name: Deploy operational, DR, and failure-simulation scripts
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/"
+    dest: /opt/scripts/
+    owner: root
+    group: root
+    mode: '0755'
+    remote_src: false

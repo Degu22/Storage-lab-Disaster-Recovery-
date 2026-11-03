@@ -1,57 +1,174 @@
-# Architecture Specification: Enterprise Storage Service Lifecycle & Disaster Recovery Lab
+# Technical Architecture Specification: Enterprise Storage Service Lifecycle & Disaster Recovery Lab
 
-## 1. Storage Topology & Storage Tiering
+## 1. Executive Summary
 
-This laboratory environment models an enterprise on-premise shared storage architecture supporting high-performance compute clients with automated Disaster Recovery (DR).
-
-### Storage Virtualization with LVM
-* **Underlying Physical Disks:** High-performance SAS/NVMe block devices provisioned under Linux Logical Volume Manager (LVM2).
-* **Volume Group (`vg_storage`):** Aggregates raw block storage, allowing non-disruptive, live volume scaling.
-* **Logical Volume (`lv_data`):** Formatted with the **XFS** enterprise filesystem, chosen for its high scalability, direct I/O throughput, and support for metadata allocation groups.
-* **Live Scalability:** The LVM abstraction enables zero-downtime storage expansion using `lvextend -r -L +20G /dev/vg_storage/lv_data` without unmounting the live NFS share.
+This architecture implements a centralized, enterprise-grade Linux shared storage service hosted on AWS, running on Ubuntu Server 24.04 LTS. It demonstrates the complete storage service lifecycle: infrastructure provisioning with Terraform, configuration automation via Ansible, secure multi-client NFSv4 access, disaster recovery with LVM snapshots and Amazon S3, and end-to-end observability using Prometheus and Grafana.
 
 ---
 
-## 2. Protocol Selection & Tuning
+## 2. Mermaid Architecture Diagrams
 
-### NFSv4 vs NFSv3
-* **NFSv4.2 Selected:** Unlike legacy NFSv3 (which requires multiple auxiliary ports like `rpc.statd`, `rpc.lockd`, and portmapper), NFSv4 operates strictly over a single TCP port (**2049**).
-* **Stateful Locking:** NFSv4 integrates file locking directly into the protocol, eliminating stale lock bugs common in network partitions.
-* **Client Mount Optimization:**
-  * `_netdev`: Ensures systemd delays mounting until network interfaces and DNS resolvers are fully initialized.
-  * `nofail`: Prevents boot hangs if the storage node is undergoing maintenance during a client reboot.
-  * `soft, timeo=150, retrans=3`: Configures reasonable fail-fast timeout behavior (15 seconds, 3 retries) so client application threads do not freeze indefinitely if storage becomes partitioned.
-
----
-
-## 3. DevSecOps & Security Hardening
-
-1. **Subnet-Level Export Restriction:**
-   * Exports configured in `/etc/exports` strictly restrict access to the dedicated internal storage subnet (`192.168.10.0/24`). Requests from any external network are dropped at the kernel level.
-2. **Privilege Escalation Prevention (`root_squash`):**
-   * Default setting maps remote client root requests (UID 0 / GID 0) to `nfsnobody` (UID 65534). Even if an attacker gains root access on a compute client, they cannot overwrite system binaries or modify storage server files.
-3. **Network Security Zone Isolation:**
-   * The storage server uses `firewalld` to enforce internal security zone segregation. Only traffic destined for TCP port 2049 originating from approved client IPs is permitted; all management interfaces (SSH, Node Exporter) are restricted to the management plane.
-
----
-
-## 4. Disaster Recovery & Data Integrity Lifecycle
-
-```
-[Primary Live Data] ──(LVM Snapshot)──> [Read-Only Point-in-Time Image]
-                                                        │
-                                                        ▼
-                                           [Generate SHA-256 Hashes]
-                                                        │
-                                                        ▼
-                                           [Rsync Over Secure SSH]
-                                                        │
-                                                        ▼
-                                           [Remote Target: /backup/dr_repo]
-                                                        │
-                                                        ▼
-                                           [Post-Sync Hash Verification]
+### 2.1 Overall AWS Cloud Infrastructure
+```mermaid
+flowchart TD
+    subgraph AWS_Cloud ["AWS Cloud (VPC: 10.0.0.0/16)"]
+        IGW[Internet Gateway]
+        
+        subgraph Management_Subnet ["Management & Monitoring Subnet (10.0.1.0/24)"]
+            Node_A["Management Node (Ubuntu 24.04 - t3.small)<br/>• Ansible Control Engine<br/>• Prometheus (:9090)<br/>• Grafana (:3000)<br/>• Alertmanager (:9093)"]
+        end
+        
+        subgraph Storage_Subnet ["Storage & Compute Subnet (10.0.2.0/24)"]
+            Node_B["NFS Storage Server (Ubuntu 24.04 - t3.micro)<br/>• LVM2 (vg_storage / lv_data)<br/>• XFS Filesystem (/srv/nfs_share)<br/>• NFSv4 Kernel Server<br/>• Node Exporter (:9100)"]
+            Node_C["NFS Client Compute Node (Ubuntu 24.04 - t3.micro)<br/>• Mount: /mnt/nfs_share<br/>• Node Exporter (:9100)"]
+            EBS_Data[("Dedicated EBS gp3 Data Volume<br/>(20 GiB, Encrypted)")]
+            EBS_Data --- Node_B
+        end
+        
+        subgraph S3_DR ["Independent Disaster Recovery Destination"]
+            S3_Bucket[("Amazon S3 DR Bucket<br/>• Versioned<br/>• AES256 Encrypted<br/>• Block Public Access Active")]
+        end
+    end
+    
+    IGW --> Node_A
+    Node_A -->|SSH Automation & Scrapes| Node_B
+    Node_A -->|SSH Automation & Scrapes| Node_C
+    Node_C -->|NFSv4 TCP:2049| Node_B
+    Node_B -->|AWS CLI / IAM Role / HTTPS:443| S3_Bucket
 ```
 
-* **Zero-Impact Snapshots:** Taking point-in-time snapshots at the LVM layer bypasses the need to halt running database processes or unmount the filesystem, preventing service interruption.
-* **Cryptographic Bit-Level Validation:** The automated DR script produces an immutable hash manifest (`sha256sum`). Following file transfer, the remote DR node validates every file against this manifest. If even a single byte differs (due to network corruption or silent disk bit-rot), the job throws a P1 alert.
+### 2.2 NFS Client-to-Server Communication Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as NFS Client Node (/mnt/nfs_share)
+    participant Kernel as Linux VFS Kernel
+    participant Network as Storage Subnet (UFW Firewall)
+    participant Server as NFS Server (/srv/nfs_share)
+    participant Storage as LVM (XFS Filesystem)
+
+    Client->>Kernel: I/O Read/Write Request
+    Kernel->>Network: TCP Port 2049 (NFSv4.2 Compound RPC)
+    Network->>Server: Ingress Allowed (10.0.2.0/24)
+    Server->>Server: Validate /etc/exports (root_squash check)
+    alt Client is root (UID 0)
+        Server->>Server: Map UID 0 to nobody:nogroup (UID 65534)
+    else Standard User
+        Server->>Server: Preserve POSIX Client UID/GID
+    end
+    Server->>Storage: Direct I/O to XFS Block Layer
+    Storage-->>Server: Disk Commit Acknowledged (sync flag)
+    Server-->>Client: RPC Reply
+```
+
+### 2.3 Terraform Provisioning Flow
+```mermaid
+flowchart LR
+    A[terraform plan] --> B[Module: Networking<br/>VPC, Subnets, IGW, Route Tables]
+    B --> C[Module: Security<br/>Security Groups: Mgmt, Storage, Client]
+    C --> D[Module: Storage<br/>EBS gp3 Volume & S3 DR Bucket]
+    D --> E[Module: IAM<br/>EC2 Role, Instance Profile, S3 DR Policy]
+    E --> F[Module: Compute<br/>3x EC2 Ubuntu 24.04 Instances + EBS Attachment]
+    F --> G[Outputs<br/>IP Addresses & Inventory Helper]
+```
+
+### 2.4 Ansible Configuration Pipeline
+```mermaid
+flowchart TD
+    Site[site.yml] --> Common[Role: common<br/>Base packages, Chrony NTP, UFW Baseline]
+    Site --> NodeExp[Role: node_exporter<br/>Install binary & open port 9100]
+    Site --> Storage[Role: storage<br/>Identify disk, LVM vg/lv, format XFS, mount /srv/nfs_share]
+    Site --> NFSServer[Role: nfs_server<br/>Configure /etc/exports, root_squash, UFW port 2049]
+    Site --> NFSClient[Role: nfs_client<br/>Install nfs-common, persistent /etc/fstab, mount /mnt/nfs_share]
+    Site --> Validate[Playbook: validation.yml<br/>Verify mount, write test, assert root_squash UID mapping]
+```
+
+### 2.5 Backup-to-S3 Disaster Recovery Workflow
+```mermaid
+flowchart TD
+    Start([Backup Job Triggered]) --> Step1[1. Verify /srv/nfs_share is mounted]
+    Step1 --> Step2[2. Quiesce XFS Filesystem: xfs_freeze -f]
+    Step2 --> Step3[3. Create LVM Point-in-Time Snapshot: lvcreate -s]
+    Step3 --> Step4[4. Unfreeze Filesystem: xfs_freeze -u]
+    Step4 --> Step5[5. Mount Snapshot Read-Only: /mnt/snapshot_temp]
+    Step5 --> Step6[6. Compress Archive: tar -czf]
+    Step6 --> Step7[7. Calculate Cryptographic SHA-256 Checksum]
+    Step7 --> Step8[8. Upload Archive & Manifest to Amazon S3 via AWS CLI]
+    Step8 --> Step9[9. Validate S3 Upload & Compare Checksums]
+    Step9 --> Step10[10. Unmount & Destroy Snapshot: lvremove]
+    Step10 --> End([Backup Verified & Complete])
+```
+
+### 2.6 Disaster Recovery Staged Restore Workflow
+```mermaid
+flowchart TD
+    Start([Disaster Event / Restore Triggered]) --> Step1[1. Download Archive & Manifest from S3 to Staging Area]
+    Step1 --> Step2[2. Validate SHA-256 Hash of Downloaded Archive]
+    Step2 -->|Hash Mismatch| Abort([ABORT: Corrupt Archive])
+    Step2 -->|Hash Matches| Step3[3. Extract into /srv/nfs_restore_staging]
+    Step3 --> Step4[4. Audit File Permissions & Ownership]
+    Step4 --> Step5{5. Controlled Cutover Gate:<br/>--confirm-cutover passed?}
+    Step5 -->|No| Standby([STAGING COMPLETE: Awaiting Ops Approval])
+    Step5 -->|Yes| Step6[6. Temporarily Unexport Live NFS Share]
+    Step6 --> Step7[7. Rsync Staged Data to Live Directory with Pre-Restore Backup]
+    Step7 --> Step8[8. Re-Export NFS Share & Restore SELinux/Permissions]
+    Step8 --> Step9[9. Measure Elapsed Time: Record Achieved RTO]
+    Step9 --> End([Service Restored & Verified])
+```
+
+### 2.7 Observability & Metric Scraping Architecture
+```mermaid
+flowchart LR
+    subgraph Management_Node ["Management Node"]
+        Prometheus[Prometheus Server :9090]
+        Grafana[Grafana Dashboard :3000]
+        Alertmanager[Alertmanager :9093]
+        Prometheus --> Grafana
+        Prometheus --> Alertmanager
+    end
+
+    subgraph Storage_Node ["NFS Storage Server"]
+        NodeExp1[Node Exporter :9100]
+        NFSD[NFS Kernel Metrics]
+        LVM_Metrics[Filesystem & Disk I/O]
+        LVM_Metrics --> NodeExp1
+        NFSD --> NodeExp1
+    end
+
+    subgraph Client_Node ["NFS Client Node"]
+        NodeExp2[Node Exporter :9100]
+        ClientMount[NFS Mountstats]
+        ClientMount --> NodeExp2
+    end
+
+    Prometheus -->|Pull Metrics Every 15s| NodeExp1
+    Prometheus -->|Pull Metrics Every 15s| NodeExp2
+```
+
+### 2.8 Failure Detection and Incident Response Workflow
+```mermaid
+flowchart TD
+    A[Failure Simulated: e.g. Disk-Fill >90% or NFS Crash] --> B[Prometheus Evaluates Rule]
+    B -->|Condition Met for >2m| C[Alertmanager Fires P1 Alert]
+    C --> D[Engineer Runs storage_health_check.sh]
+    D --> E[Isolate Cause: Volume Full or Daemon Down]
+    E --> F[Run Remediation Runbook or restore_from_s3.sh]
+    F --> G[Run reset_lab.sh & validation.yml]
+    G --> H[Prometheus Auto-Resolves Alert]
+```
+
+---
+
+## 3. Network & Security Design
+
+1. **Subnet Segmentation:**
+   * `Management Subnet (10.0.1.0/24)`: Houses monitoring and operational tooling.
+   * `Storage Subnet (10.0.2.0/24)`: Dedicated to data traffic between compute clients and storage servers.
+2. **Security Groups:**
+   * Port 2049 (NFSv4) is strictly restricted to internal subnets.
+   * Management ports (22, 3000, 9090) are constrained to approved administrative ingress CIDRs.
+   * Port 9100 (Node Exporter) is strictly restricted to the Management subnet.
+3. **IAM Least Privilege:**
+   * No static AWS access keys are deployed to instances. All S3 interactions use an EC2 IAM Instance Profile scoped strictly to `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`, and `s3:DeleteObject` on the target backup bucket ARN.
+4. **DevSecOps Root Squashing:**
+   * By default, client-side root accounts are squashed to `nobody:nogroup` on Ubuntu 24.04, neutralizing remote privilege escalation threats.

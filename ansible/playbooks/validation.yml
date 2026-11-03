@@ -1,0 +1,42 @@
+---
+# Automated Validation & Compliance Check Playbook
+- name: Validate Storage Access, Permissions & DevSecOps Controls
+  hosts: storage_clients
+  become: true
+  tasks:
+    - name: 1. Verify filesystem mount is active
+      ansible.builtin.command: "mountpoint -q {{ nfs_client_mount }}"
+      register: mount_status
+      changed_when: false
+      failed_when: mount_status.rc != 0
+
+    - name: 2. Test standard unprivileged user file creation
+      ansible.builtin.copy:
+        content: "Enterprise storage verification timestamp: {{ ansible_date_time.iso8601 }}\n"
+        dest: "{{ nfs_client_mount }}/client_write_test_{{ inventory_hostname }}.txt"
+        owner: "{{ nfs_squash_user | default('nobody') }}"
+        group: "{{ nfs_squash_group | default('nogroup') }}"
+        mode: '0644'
+
+    - name: 3. DevSecOps Test - Assert root_squash prevents client root escalation
+      ansible.builtin.file:
+        path: "{{ nfs_client_mount }}/root_security_probe_{{ inventory_hostname }}.tmp"
+        state: touch
+        mode: '0644'
+
+    - name: 4. Inspect file ownership of root-created probe
+      ansible.builtin.stat:
+        path: "{{ nfs_client_mount }}/root_security_probe_{{ inventory_hostname }}.tmp"
+      register: root_probe_stat
+
+    - name: 5. Programmatically assert that root UID was squashed (UID != 0)
+      ansible.builtin.assert:
+        that:
+          - root_probe_stat.stat.uid != 0
+        fail_msg: "CRITICAL SECURITY BREACH: root_squash is INACTIVE! Client root retained UID 0."
+        success_msg: "SECURITY PASSED: root_squash active. Client root mapped to unprivileged UID ({{ root_probe_stat.stat.uid }})."
+
+    - name: 6. Clean up temporary test files
+      ansible.builtin.file:
+        path: "{{ nfs_client_mount }}/root_security_probe_{{ inventory_hostname }}.tmp"
+        state: absent

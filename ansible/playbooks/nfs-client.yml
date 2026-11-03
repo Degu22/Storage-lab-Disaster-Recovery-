@@ -1,0 +1,9 @@
+---
+# Standalone Provisioning Playbook for NFS Client Node
+- name: Provision NFS Client Node
+  hosts: storage_clients
+  become: true
+  roles:
+    - common
+    - nfs_client
+    - node_exporter

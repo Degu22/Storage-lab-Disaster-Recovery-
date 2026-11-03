@@ -1,0 +1,32 @@
+---
+# NFSv4 Client Mounting & Persistence Automation on Ubuntu 24.04
+- name: Install NFS client utilities
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+
+- name: Create client mount target directory
+  ansible.builtin.file:
+    path: "{{ nfs_client_mount }}"
+    state: directory
+    mode: '0755'
+
+- name: Mount remote NFSv4 share and configure persistent entry in /etc/fstab
+  # DevSecOps Hardening: Using 'hard' instead of 'soft' to prevent silent data corruption
+  # during network retries. 'timeo=600,retrans=2' ensures robust connection handling.
+  ansible.posix.mount:
+    path: "{{ nfs_client_mount }}"
+    src: "{{ nfs_server_private_ip }}:{{ nfs_export_path }}"
+    fstype: nfs4
+    opts: "defaults,_netdev,nofail,hard,timeo=600,retrans=2"
+    state: mounted
+
+- name: Verify mount availability
+  ansible.builtin.command: "mountpoint -q {{ nfs_client_mount }}"
+  register: mount_check
+  changed_when: false
+  failed_when: mount_check.rc != 0
+
+- name: Output mount confirmation
+  ansible.builtin.debug:
+    msg: "NFS share successfully verified and mounted at {{ nfs_client_mount }} on host {{ inventory_hostname }}"

@@ -1,0 +1,38 @@
+---
+# NFSv4 Server Provisioning & Hardening on Ubuntu 24.04
+- name: Install NFS kernel server package
+  ansible.builtin.apt:
+    name: nfs-kernel-server
+    state: present
+
+- name: Configure secure NFS exports (/etc/exports)
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    regexp: "^{{ nfs_export_path }}"
+    line: "{{ nfs_export_path }} {{ storage_subnet }}(rw,sync,no_subtree_check,root_squash)"
+    create: true
+    mode: '0644'
+  notify: Reload NFS Exports
+
+- name: Allow NFSv4 traffic through UFW from internal storage subnet
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ storage_subnet }}"
+    port: '2049'
+    proto: tcp
+    comment: "Allow NFSv4 from storage subnet"
+
+- name: Ensure NFS Server daemon is running and enabled
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    state: started
+    enabled: true
+
+- name: Verify active exports using exportfs
+  ansible.builtin.command: exportfs -v
+  register: exportfs_output
+  changed_when: false
+
+- name: Display active export status
+  ansible.builtin.debug:
+    var: exportfs_output.stdout_lines

@@ -1,0 +1,46 @@
+---
+# Common tasks for Ubuntu Server 24.04 LTS
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install baseline system utilities
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - git
+      - htop
+      - iotop
+      - sysstat
+      - chrony
+      - ufw
+      - jq
+      - unzip
+      - tree
+    state: present
+
+- name: Ensure Chrony time synchronization is running
+  ansible.builtin.systemd:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Configure UFW default policies
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: 'incoming', policy: 'deny' }
+    - { direction: 'outgoing', policy: 'allow' }
+
+- name: Allow SSH through UFW
+  community.general.ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+
+- name: Enable UFW firewall
+  community.general.ufw:
+    state: enabled

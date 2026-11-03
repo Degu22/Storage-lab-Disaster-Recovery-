@@ -1,0 +1,22 @@
+# Example Alertmanager Configuration
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'tier']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'storage-team-webhook'
+
+receivers:
+  - name: 'storage-team-webhook'
+    webhook_configs:
+      - url: 'http://127.0.0.1:5001/webhook'
+        send_resolved: true
+
+# Optional Email / Slack notification receiver example:
+#  - name: 'storage-team-slack'
+#    slack_configs:
+#      - channel: '#storage-alerts'
+#        api_url: 'https://hooks.slack.com/services/EXAMPLE'

@@ -1,0 +1,24 @@
+---
+# Master Orchestration Playbook - Enterprise Storage & DR Lab
+- name: Apply Common Base Configuration to all nodes
+  hosts: all
+  become: true
+  roles:
+    - common
+    - node_exporter
+
+- name: Provision Storage & NFS Server
+  hosts: storage_servers
+  become: true
+  roles:
+    - storage
+    - nfs_server
+
+- name: Provision NFS Clients & Mount Storage
+  hosts: storage_clients
+  become: true
+  roles:
+    - nfs_client
+
+- name: Validate Storage Access & Security Controls
+  import_playbook: validation.yml

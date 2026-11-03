@@ -1,0 +1,20 @@
+---
+# Prometheus Node Exporter Installation & UFW Security
+- name: Install Prometheus Node Exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+
+- name: Allow Node Exporter port 9100 through UFW from Management Subnet
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ management_subnet }}"
+    port: '9100'
+    proto: tcp
+    comment: "Prometheus metrics scrape access"
+
+- name: Ensure Node Exporter service is running and enabled
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true

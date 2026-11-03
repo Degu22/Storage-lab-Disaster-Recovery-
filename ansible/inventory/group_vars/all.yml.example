@@ -1,0 +1,32 @@
+---
+# ==============================================================================
+# Global Variables Example - Ansible Group Vars
+# ==============================================================================
+project_name: "storage-dr-lab"
+environment: "lab"
+
+# Storage Configuration
+nfs_export_path: "/srv/nfs_share"
+nfs_client_mount: "/mnt/nfs_share"
+vg_name: "vg_storage"
+lv_name: "lv_data"
+lv_size: "15G"
+filesystem_type: "xfs"
+
+# DevSecOps Security Settings
+nfs_squash_user: "nobody"
+nfs_squash_group: "nogroup"
+storage_subnet: "10.0.2.0/24"
+management_subnet: "10.0.1.0/24"
+
+# Observability
+prometheus_version: "2.51.0"
+node_exporter_version: "1.7.0"
+grafana_port: 3000
+prometheus_port: 9090
+node_exporter_port: 9100
+
+# Disaster Recovery & AWS
+s3_bucket_name: "storage-dr-backup-lab-bucket"
+backup_staging_dir: "/srv/nfs_backup_staging"
+restore_staging_dir: "/srv/nfs_restore_staging"
